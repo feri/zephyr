@@ -38,6 +38,9 @@
 #define SENS_PROP_ID_UNIT_TEMP_CELCIUS 0x272F
 #define SENS_PROP_ID_TEMP_CELCIUS_SIZE 2
 
+#define SENS_PROP_ID_ACC 0x2A20
+#define SENS_PROP_ID_UNIT_ACC 0x2730
+
 enum {
 	SENSOR_HDR_A = 0,
 	SENSOR_HDR_B = 1,
@@ -217,6 +220,83 @@ static void sens_temperature_celcius_fill(struct net_buf_simple *msg)
 	net_buf_simple_add_le16(msg, temp_degrees);
 }
 
+
+/**
+ * @brief Helper function for printing a sensor value to a buffer
+ *
+ * @param buf A pointer to the buffer to which the printing is done.
+ * @param len Size of buffer in bytes.
+ * @param val A pointer to a sensor_value struct holding the value
+ *            to be printed.
+ *
+ * @return The number of characters printed to the buffer.
+ */
+static inline int sensor_value_snprintf(char *buf, size_t len,
+					const struct sensor_value *val)
+{
+	s32_t val1, val2;
+
+	if (val->val2 == 0) {
+		return snprintf(buf, len, "%d", val->val1);
+	}
+
+	/* normalize value */
+	if (val->val1 < 0 && val->val2 > 0) {
+		val1 = val->val1 + 1;
+		val2 = val->val2 - 1000000;
+	} else {
+		val1 = val->val1;
+		val2 = val->val2;
+	}
+
+	/* print value to buffer */
+	if (val1 > 0 || (val1 == 0 && val2 > 0)) {
+		return snprintf(buf, len, "%d.%06d", val1, val2);
+	} else if (val1 == 0 && val2 < 0) {
+		return snprintf(buf, len, "-0.%06d", -val2);
+	} else {
+		return snprintf(buf, len, "%d.%06d", val1, -val2);
+	}
+}
+
+static void sens_accelerator_fill(struct net_buf_simple *msg)
+{
+	//~ u16_t len = 0;
+	struct sensor_hdr_b hdr;
+	//~ static char str_buf[256];
+
+	struct sensor_value val[3];
+	char buf_x[18], buf_y[18], buf_z[18];
+	
+	/* mma8652 */
+	if (get_mma8652_val(val)) {
+		printk("oops, no accel data");
+		return;
+	}
+
+	sensor_value_snprintf(buf_x, sizeof(buf_x), &val[0]);
+	sensor_value_snprintf(buf_y, sizeof(buf_y), &val[1]);
+	sensor_value_snprintf(buf_z, sizeof(buf_z), &val[2]);
+
+	printk("Acc (m/s^2): X=%s, Y=%s, Z=%s\n", buf_x, buf_y, buf_z);
+
+	char str[54];
+
+	strncpy(str, buf_x, 18);
+	strcat(str, buf_y);
+	strcat(str, buf_z);
+	str[54] = '\0';
+	
+	board_show_text(str, false, K_SECONDS(3));
+
+	hdr.format = SENSOR_HDR_B;
+	hdr.length = sizeof(buf_x);
+	hdr.prop_id = SENS_PROP_ID_UNIT_ACC;
+
+	net_buf_simple_add_mem(msg, &hdr, sizeof(hdr));
+	net_buf_simple_add_mem(msg, str, sizeof(str));
+}
+
 static void sens_unknown_fill(u16_t id, struct net_buf_simple *msg)
 {
 	struct sensor_hdr_a hdr;
@@ -239,8 +319,13 @@ static void sensor_create_status(u16_t id, struct net_buf_simple *msg)
 	bt_mesh_model_msg_init(msg, BT_MESH_MODEL_OP_SENS_STATUS);
 
 	switch (id) {
+    // 0x2A1F
 	case SENS_PROP_ID_TEMP_CELCIUS:
 		sens_temperature_celcius_fill(msg);
+		break;
+    // 0x2A20: made up by Ferenc
+	case SENS_PROP_ID_ACC:
+		sens_accelerator_fill(msg);
 		break;
 	default:
 		sens_unknown_fill(id, msg);
@@ -313,7 +398,6 @@ static void vnd_hello(struct bt_mesh_model *model,
 		      struct net_buf_simple *buf)
 {
 	char str[32];
-	size_t len;
 
 	printk("Hello message from 0x%04x\n", ctx->addr);
 
@@ -322,9 +406,8 @@ static void vnd_hello(struct bt_mesh_model *model,
 		return;
 	}
 
-	len = min(buf->len, HELLO_MAX);
-	memcpy(str, buf->data, len);
-	str[len] = '\0';
+	strncpy(str, buf->data, HELLO_MAX);
+	str[HELLO_MAX] = '\0';
 
 	board_add_hello(ctx->addr, str);
 
@@ -416,8 +499,7 @@ static void send_hello(struct k_work *work)
 	const char *name = bt_get_name();
 
 	bt_mesh_model_msg_init(&msg, OP_VND_HELLO);
-	net_buf_simple_add_mem(&msg, name,
-			       min(HELLO_MAX, first_name_len(name)));
+	net_buf_simple_add_mem(&msg, name, first_name_len(name));
 
 	if (bt_mesh_model_send(&vnd_models[0], &ctx, &msg, NULL, NULL) == 0) {
 		board_show_text("Saying \"hi!\" to everyone", false,
@@ -436,7 +518,7 @@ static int provision_and_configure(void)
 {
 	static const u8_t net_key[16] = {
 		0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
-		0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
+		0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xfe,
 	};
 	static const u8_t app_key[16] = {
 		0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa,

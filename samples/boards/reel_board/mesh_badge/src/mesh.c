@@ -41,6 +41,9 @@
 #define SENS_PROP_ID_ACC 0x2A20
 #define SENS_PROP_ID_UNIT_ACC 0x2730
 
+#define SENS_PROP_ID_LIGHT 0x2A21
+#define SENS_PROP_ID_UNIT_LIGHT 0x2731
+
 enum {
 	SENSOR_HDR_A = 0,
 	SENSOR_HDR_B = 1,
@@ -220,6 +223,25 @@ static void sens_temperature_celcius_fill(struct net_buf_simple *msg)
 	net_buf_simple_add_le16(msg, temp_degrees);
 }
 
+static void sens_light_fill(struct net_buf_simple *msg)
+{
+	struct sensor_hdr_b hdr;
+
+	struct sensor_value val[2];
+	s16_t light_val;
+
+	hdr.format = SENSOR_HDR_B;
+	hdr.length = sizeof(light_val);
+	hdr.prop_id = SENS_PROP_ID_UNIT_LIGHT;
+
+	get_apds9960_val(val);
+
+    /* NOTE: ignoring proximity data here */
+	light_val = sensor_value_to_double(&val[0]);
+
+	net_buf_simple_add_mem(msg, &hdr, sizeof(hdr));
+	net_buf_simple_add_le16(msg, light_val);
+}
 
 /**
  * @brief Helper function for printing a sensor value to a buffer
@@ -327,6 +349,10 @@ static void sensor_create_status(u16_t id, struct net_buf_simple *msg)
 	case SENS_PROP_ID_ACC:
 		sens_accelerator_fill(msg);
 		break;
+    // 0x2A21: made up by Oleksandr Mykhalevych
+    case SENS_PROP_ID_LIGHT:
+        sens_light_fill(msg);
+        break;
 	default:
 		sens_unknown_fill(id, msg);
 		break;
@@ -518,7 +544,7 @@ static int provision_and_configure(void)
 {
 	static const u8_t net_key[16] = {
 		0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
-		0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xfe,
+		0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0x04,
 	};
 	static const u8_t app_key[16] = {
 		0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa,

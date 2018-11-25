@@ -60,7 +60,7 @@ static void configure_gpios(void)
 
 int set_led_state(u8_t id, bool state)
 {
-	/* Invert state because of active low state for GPIO LED pins */
+	/* Pin set low turns on LED's on the reel board */
 	return gpio_pin_write(led_dev_info[id].dev, led_dev_info[id].pin,
 			      !state);
 }

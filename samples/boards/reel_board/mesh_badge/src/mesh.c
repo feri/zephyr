@@ -20,8 +20,10 @@
 #define MOD_LF            0x0000
 #define OP_HELLO          0xbb
 #define OP_HEARTBEAT      0xbc
+#define OP_GET_NAME       0xbd
 #define OP_VND_HELLO      BT_MESH_MODEL_OP_3(OP_HELLO, BT_COMP_ID_LF)
 #define OP_VND_HEARTBEAT  BT_MESH_MODEL_OP_3(OP_HEARTBEAT, BT_COMP_ID_LF)
+#define OP_VND_GET_NAME   BT_MESH_MODEL_OP_3(OP_GET_NAME, BT_COMP_ID_LF)
 
 #define DEFAULT_TTL       31
 #define GROUP_ADDR        0xc123
@@ -75,8 +77,8 @@ static void heartbeat(u8_t hops, u16_t feat)
 }
 
 static struct bt_mesh_cfg_srv cfg_srv = {
-	.relay = BT_MESH_RELAY_ENABLED,
-	.beacon = BT_MESH_BEACON_ENABLED,
+	.relay = BT_MESH_RELAY_DISABLED,
+	.beacon = BT_MESH_BEACON_DISABLED,
 	.default_ttl = DEFAULT_TTL,
 
 	/* 3 transmissions with 20ms interval */
@@ -159,10 +161,8 @@ static void gen_onoff_set_unack(struct bt_mesh_model *model,
 	printk("addr 0x%02x state 0x%02x\n",
 	       bt_mesh_model_elem(model)->addr, state->current);
 
-	/* Pin set low turns on LED's on the reel board */
 	if (set_led_state(state->dev_id, onoff)) {
 		printk("Failed to set led state\n");
-
 		return;
 	}
 
@@ -424,6 +424,7 @@ static void vnd_hello(struct bt_mesh_model *model,
 		      struct net_buf_simple *buf)
 {
 	char str[32];
+	size_t len;
 
 	printk("Hello message from 0x%04x\n", ctx->addr);
 
@@ -432,8 +433,9 @@ static void vnd_hello(struct bt_mesh_model *model,
 		return;
 	}
 
-	strncpy(str, buf->data, HELLO_MAX);
-	str[HELLO_MAX] = '\0';
+	len = min(buf->len, HELLO_MAX);
+	memcpy(str, buf->data, len);
+	str[len] = '\0';
 
 	board_add_hello(ctx->addr, str);
 
@@ -463,9 +465,47 @@ static void vnd_heartbeat(struct bt_mesh_model *model,
 	board_add_heartbeat(ctx->addr, hops);
 }
 
+static size_t first_name_len(const char *name)
+{
+	size_t len;
+
+	for (len = 0; *name; name++, len++) {
+		switch (*name) {
+		case ' ':
+		case ',':
+		case '\n':
+			return len;
+		}
+	}
+
+	return len;
+}
+
+static void vnd_get_name(struct bt_mesh_model *model,
+			  struct bt_mesh_msg_ctx *ctx,
+			  struct net_buf_simple *buf)
+{
+	const char *name = bt_get_name();
+	NET_BUF_SIMPLE_DEFINE(msg, 3 + HELLO_MAX + 4);
+
+	/* Ignore messages from self */
+	if (ctx->addr == bt_mesh_model_elem(model)->addr) {
+		return;
+	}
+
+	bt_mesh_model_msg_init(&msg, OP_VND_GET_NAME);
+	net_buf_simple_add_mem(&msg, name,
+			       min(HELLO_MAX, first_name_len(name)));
+
+	if (bt_mesh_model_send(model, ctx, &msg, NULL, NULL) == 0) {
+		printk("Unable to send Vendor get name response\n");
+	}
+}
+
 static const struct bt_mesh_model_op vnd_ops[] = {
 	{ OP_VND_HELLO, 1, vnd_hello },
 	{ OP_VND_HEARTBEAT, 1, vnd_heartbeat },
+	{ OP_VND_GET_NAME, 0, vnd_get_name },
 	BT_MESH_MODEL_OP_END,
 };
 
@@ -497,22 +537,6 @@ static const struct bt_mesh_comp comp = {
 	.elem_count = ARRAY_SIZE(elements),
 };
 
-static size_t first_name_len(const char *name)
-{
-	size_t len;
-
-	for (len = 0; *name; name++, len++) {
-		switch (*name) {
-		case ' ':
-		case ',':
-		case '\n':
-			return len;
-		}
-	}
-
-	return len;
-}
-
 static void send_hello(struct k_work *work)
 {
 	NET_BUF_SIMPLE_DEFINE(msg, 3 + HELLO_MAX + 4);
@@ -525,7 +549,8 @@ static void send_hello(struct k_work *work)
 	const char *name = bt_get_name();
 
 	bt_mesh_model_msg_init(&msg, OP_VND_HELLO);
-	net_buf_simple_add_mem(&msg, name, first_name_len(name));
+	net_buf_simple_add_mem(&msg, name,
+			       min(HELLO_MAX, first_name_len(name)));
 
 	if (bt_mesh_model_send(&vnd_models[0], &ctx, &msg, NULL, NULL) == 0) {
 		board_show_text("Saying \"hi!\" to everyone", false,
@@ -544,7 +569,7 @@ static int provision_and_configure(void)
 {
 	static const u8_t net_key[16] = {
 		0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
-		0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xfe,
+		0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, TEAM,
 	};
 	static const u8_t app_key[16] = {
 		0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa,
@@ -566,12 +591,7 @@ static int provision_and_configure(void)
 		return err;
 	}
 
-	do {
-		err = bt_rand(&addr, sizeof(addr));
-		if (err) {
-			return err;
-		}
-	} while (!addr);
+	addr = NODE;
 
 	/* Make sure it's a unicast address (highest bit unset) */
 	addr &= ~0x8000;

@@ -132,11 +132,21 @@ static void connected(struct bt_conn *conn, u8_t err)
 	}
 }
 
+static void get_default_name(char *name, size_t len)
+{
+	snprintk(name, len, "%s,Team %u,Node %u",
+		 CONFIG_BT_DEVICE_NAME, TEAM, NODE);
+}
+
 static void disconnected(struct bt_conn *conn, u8_t reason)
 {
+	char default_name[CONFIG_BT_DEVICE_NAME_MAX];
+
+	get_default_name(default_name, sizeof(default_name));
+
 	printk("Disconnected (reason 0x%02x)\n", reason);
 
-	if (strcmp(CONFIG_BT_DEVICE_NAME, bt_get_name()) &&
+	if (strcmp(default_name, bt_get_name()) &&
 	    !mesh_is_initialized()) {
 		/* Mesh will take over advertising control */
 		bt_le_adv_stop();
@@ -178,6 +188,11 @@ static void bt_ready(int err)
 	}
 
 	if (!mesh_is_initialized()) {
+		char name[CONFIG_BT_DEVICE_NAME_MAX];
+
+		get_default_name(name, sizeof(name));
+		bt_set_name(name);
+
 		/* Start advertising */
 		err = bt_le_adv_start(BT_LE_ADV_CONN_NAME,
 				      ad, ARRAY_SIZE(ad), NULL, 0);
@@ -205,6 +220,7 @@ void main(void)
 	}
 
 	printk("Starting Board Demo\n");
+	printk("Team %u Node %u\n", TEAM, NODE);
 
 	/* Initialize the Bluetooth Subsystem */
 	err = bt_enable(bt_ready);

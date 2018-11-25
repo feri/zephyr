@@ -259,7 +259,7 @@ static inline int sensor_value_snprintf(char *buf, size_t len,
 	}
 }
 
-static void sens_accelerator_fill(struct net_buf_simple *msg)
+static void sens_accelerometer_fill(struct net_buf_simple *msg)
 {
 	//~ u16_t len = 0;
 	struct sensor_hdr_b hdr;
@@ -325,7 +325,7 @@ static void sensor_create_status(u16_t id, struct net_buf_simple *msg)
 		break;
     // 0x2A20: made up by Ferenc
 	case SENS_PROP_ID_ACC:
-		sens_accelerator_fill(msg);
+		sens_accelerometer_fill(msg);
 		break;
 	default:
 		sens_unknown_fill(id, msg);
